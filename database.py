@@ -6,12 +6,12 @@ from models import Config, DayEntry, DayFlags, EventType, MonthlySummary
 DB_PATH = Path(__file__).parent / "data" / "controle_horas.db"
 
 DEFAULT_EVENT_TYPES = [
-    ("Normal", "#4CAF50"),
-    ("Experimental", "#9C27B0"),
-    ("Reposição", "#FF9800"),
-    ("Reunião", "#2196F3"),
-    ("Coordenação", "#F44336"),
-    ("Outros", "#607D8B"),
+    ("Normal", "#8BC34A"),
+    ("Experimental", "#26C6DA"),
+    ("Reposição", "#FDD835"),
+    ("Reunião", "#FFA726"),
+    ("Coordenação", "#AB47BC"),
+    ("Outros", "#EF5350"),
 ]
 
 
@@ -73,12 +73,17 @@ def init_db() -> None:
         if row[0] == 0:
             conn.execute("INSERT INTO config (id) VALUES (1)")
 
-        # Seed event types if empty
+        # Seed event types if empty, otherwise sync colors
         row = conn.execute("SELECT COUNT(*) FROM event_types").fetchone()
         if row[0] == 0:
             conn.executemany(
                 "INSERT INTO event_types (name, color) VALUES (?, ?)",
                 DEFAULT_EVENT_TYPES,
+            )
+        else:
+            conn.executemany(
+                "UPDATE event_types SET color=? WHERE name=?",
+                [(color, name) for name, color in DEFAULT_EVENT_TYPES],
             )
 
         conn.commit()
@@ -153,12 +158,37 @@ def upsert_day_entry(entry: DayEntry) -> None:
         conn.close()
 
 
+def get_day_entries(year: int, month: int, day: int) -> list[DayEntry]:
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT year, month, day, slot, event_type_id, hours "
+            "FROM day_entries WHERE year=? AND month=? AND day=? ORDER BY slot",
+            (year, month, day),
+        ).fetchall()
+        return [DayEntry(*r) for r in rows]
+    finally:
+        conn.close()
+
+
 def delete_day_entry(year: int, month: int, day: int, slot: int) -> None:
     conn = get_connection()
     try:
         conn.execute(
             "DELETE FROM day_entries WHERE year=? AND month=? AND day=? AND slot=?",
             (year, month, day, slot),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def delete_day_entries_for_day(year: int, month: int, day: int) -> None:
+    conn = get_connection()
+    try:
+        conn.execute(
+            "DELETE FROM day_entries WHERE year=? AND month=? AND day=?",
+            (year, month, day),
         )
         conn.commit()
     finally:
