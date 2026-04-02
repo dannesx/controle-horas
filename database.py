@@ -6,12 +6,12 @@ from models import Config, DayEntry, DayFlags, EventType, MonthlySummary
 DB_PATH = Path(__file__).parent / "data" / "controle_horas.db"
 
 DEFAULT_EVENT_TYPES = [
-    ("Normal", "#8BC34A"),
-    ("Experimental", "#26C6DA"),
-    ("Reposição", "#FDD835"),
-    ("Reunião", "#FFA726"),
-    ("Coordenação", "#AB47BC"),
-    ("Outros", "#EF5350"),
+    ("Normal", "#8ac926"),
+    ("Reposição", "#fe994a"),
+    ("Reunião", "#FDD835"),
+    ("Experimental", "#1982c4"),
+    ("Coordenação", "#6a4c93"),
+    ("Outros", "#ff595e"),
 ]
 
 
@@ -28,10 +28,11 @@ def init_db() -> None:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS config (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
-                valor_hora REAL NOT NULL DEFAULT 30.0,
-                valor_ae   REAL NOT NULL DEFAULT 30.0,
-                vt_dia     REAL NOT NULL DEFAULT 16.0,
-                vr_dia     REAL NOT NULL DEFAULT 30.0
+                nome       TEXT NOT NULL DEFAULT '',
+                valor_hora REAL NOT NULL DEFAULT 0,
+                valor_ae   REAL NOT NULL DEFAULT 0,
+                vt_dia     REAL NOT NULL DEFAULT 0,
+                vr_dia     REAL NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS event_types (
@@ -73,17 +74,17 @@ def init_db() -> None:
         if row[0] == 0:
             conn.execute("INSERT INTO config (id) VALUES (1)")
 
-        # Seed event types if empty, otherwise sync colors
+        # Migrate: add nome column if missing
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(config)").fetchall()]
+        if "nome" not in cols:
+            conn.execute("ALTER TABLE config ADD COLUMN nome TEXT NOT NULL DEFAULT ''")
+
+        # Seed event types if empty
         row = conn.execute("SELECT COUNT(*) FROM event_types").fetchone()
         if row[0] == 0:
             conn.executemany(
                 "INSERT INTO event_types (name, color) VALUES (?, ?)",
                 DEFAULT_EVENT_TYPES,
-            )
-        else:
-            conn.executemany(
-                "UPDATE event_types SET color=? WHERE name=?",
-                [(color, name) for name, color in DEFAULT_EVENT_TYPES],
             )
 
         conn.commit()
@@ -97,7 +98,7 @@ def get_config() -> Config:
     conn = get_connection()
     try:
         row = conn.execute(
-            "SELECT valor_hora, valor_ae, vt_dia, vr_dia FROM config WHERE id = 1"
+            "SELECT nome, valor_hora, valor_ae, vt_dia, vr_dia FROM config WHERE id = 1"
         ).fetchone()
         return Config(*row)
     finally:
@@ -108,8 +109,8 @@ def update_config(config: Config) -> None:
     conn = get_connection()
     try:
         conn.execute(
-            "UPDATE config SET valor_hora=?, valor_ae=?, vt_dia=?, vr_dia=? WHERE id=1",
-            (config.valor_hora, config.valor_ae, config.vt_dia, config.vr_dia),
+            "UPDATE config SET nome=?, valor_hora=?, valor_ae=?, vt_dia=?, vr_dia=? WHERE id=1",
+            (config.nome, config.valor_hora, config.valor_ae, config.vt_dia, config.vr_dia),
         )
         conn.commit()
     finally:
@@ -123,6 +124,18 @@ def get_event_types() -> list[EventType]:
     try:
         rows = conn.execute("SELECT id, name, color FROM event_types ORDER BY id").fetchall()
         return [EventType(*r) for r in rows]
+    finally:
+        conn.close()
+
+
+def update_event_type_color(event_id: int, color: str) -> None:
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE event_types SET color=? WHERE id=?",
+            (color, event_id),
+        )
+        conn.commit()
     finally:
         conn.close()
 

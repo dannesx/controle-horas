@@ -29,6 +29,7 @@ class DayFlags:
 
 @dataclass
 class Config:
+    nome: str
     valor_hora: float
     valor_ae: float
     vt_dia: float
