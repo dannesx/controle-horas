@@ -14,10 +14,11 @@ class App(ctk.CTk):
         self.geometry("1200x750")
         self.minsize(1000, 600)
 
-        ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
-
         database.init_db()
+
+        self.tema_atual = database.get_tema()
+        ctk.set_appearance_mode(self.tema_atual)
 
         # Layout
         self.grid_columnconfigure(1, weight=1)
@@ -58,6 +59,17 @@ class App(ctk.CTk):
             "config": self.btn_config,
         }
 
+        # Theme toggle (pushed to bottom by row 5 spacer)
+        self.btn_tema = ctk.CTkButton(
+            self.sidebar,
+            text="Tema: Claro" if self.tema_atual == "dark" else "Tema: Escuro",
+            command=self._toggle_tema,
+            fg_color="transparent",
+            hover_color=("gray75", "gray25"),
+            width=160,
+        )
+        self.btn_tema.grid(row=6, column=0, padx=20, pady=(0, 20))
+
         # Content area
         self.content = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
         self.content.grid(row=0, column=1, sticky="nsew")
@@ -74,6 +86,13 @@ class App(ctk.CTk):
             frame.grid(row=0, column=0, sticky="nsew")
 
         self.show_frame("lancamentos")
+
+        # Keyboard shortcuts
+        self.bind_all("<Control-Key-1>", lambda e: self.show_frame("lancamentos"))
+        self.bind_all("<Control-Key-2>", lambda e: self.show_frame("historico"))
+        self.bind_all("<Control-Key-3>", lambda e: self.show_frame("config"))
+        self.bind_all("<Control-Left>", self._on_nav_left)
+        self.bind_all("<Control-Right>", self._on_nav_right)
 
     def show_frame(self, name: str) -> None:
         for key, btn in self.nav_buttons.items():
@@ -92,6 +111,30 @@ class App(ctk.CTk):
         lancamentos = self.frames["lancamentos"]
         if hasattr(lancamentos, "refresh_summary"):
             lancamentos.refresh_summary()
+
+    def _toggle_tema(self):
+        self.tema_atual = "light" if self.tema_atual == "dark" else "dark"
+        ctk.set_appearance_mode(self.tema_atual)
+        database.set_tema(self.tema_atual)
+        self.btn_tema.configure(
+            text="Tema: Claro" if self.tema_atual == "dark" else "Tema: Escuro"
+        )
+
+    def _on_nav_left(self, event):
+        focused = self.focus_get()
+        if focused and focused.winfo_class() in ("Entry", "Text", "TCombobox"):
+            return
+        lancamentos = self.frames.get("lancamentos")
+        if lancamentos:
+            lancamentos._prev_month()
+
+    def _on_nav_right(self, event):
+        focused = self.focus_get()
+        if focused and focused.winfo_class() in ("Entry", "Text", "TCombobox"):
+            return
+        lancamentos = self.frames.get("lancamentos")
+        if lancamentos:
+            lancamentos._next_month()
 
 
 if __name__ == "__main__":

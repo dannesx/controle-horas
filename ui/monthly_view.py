@@ -1,5 +1,5 @@
 import calendar
-from datetime import date
+from datetime import date, timedelta
 
 import customtkinter as ctk
 
@@ -37,6 +37,7 @@ class DayEditPopup(ctk.CTkToplevel):
         self.geometry("420x360")
         self.resizable(False, True)
         self.transient(parent)
+        self.wait_visibility()
         self.grab_set()
 
         # Center on parent
@@ -234,6 +235,13 @@ class MonthlyView(ctk.CTkFrame):
         self._build_grid_area()
         self._build_legend()
         self._build_summary()
+
+        # Toast overlay (uses place() to float without affecting layout)
+        self.toast_label = ctk.CTkLabel(
+            self, text="", fg_color="#2d7d46", text_color="white",
+            corner_radius=8, height=32, font=ctk.CTkFont(size=12),
+        )
+
         self._load_month()
 
     # --- Navigation Bar ---
@@ -256,8 +264,19 @@ class MonthlyView(ctk.CTkFrame):
             row=0, column=2, padx=(10, 10)
         )
 
+        self.copy_menu = ctk.CTkOptionMenu(
+            nav, values=["Copiar Mês Anterior", "Copiar Semana"],
+            command=self._on_copy, width=180,
+            fg_color=("gray75", "gray25"),
+            button_color=("gray65", "gray35"),
+            button_hover_color=("gray55", "gray45"),
+            text_color=("black", "white"),
+        )
+        self.copy_menu.set("Copiar...")
+        self.copy_menu.grid(row=0, column=3, padx=(0, 10))
+
         ctk.CTkButton(nav, text="Exportar PDF", width=120, command=self._export_pdf).grid(
-            row=0, column=3
+            row=0, column=4
         )
 
     def _prev_month(self):
@@ -454,6 +473,20 @@ class MonthlyView(ctk.CTkFrame):
         self.lbl_vr = ctk.CTkLabel(right, text="VR: R$ 0,00")
         self.lbl_vr.pack(anchor="e")
 
+        ctk.CTkFrame(right, height=1, fg_color="gray40").pack(fill="x", pady=6)
+
+        self.lbl_media = ctk.CTkLabel(
+            right, text="Média/dia: 0h",
+            text_color=("gray40", "gray60"),
+        )
+        self.lbl_media.pack(anchor="e")
+
+        self.lbl_projecao = ctk.CTkLabel(
+            right, text="Projeção: R$ 0,00",
+            text_color=("gray40", "gray60"),
+        )
+        self.lbl_projecao.pack(anchor="e")
+
         self.lbl_total = ctk.CTkLabel(
             right, text="TOTAL: R$ 0,00",
             font=ctk.CTkFont(size=16, weight="bold"),
@@ -529,6 +562,7 @@ class MonthlyView(ctk.CTkFrame):
 
     def _on_day_popup_close(self, day_idx: int):
         self._active_popup = None
+        self._flash_row(day_idx)
         day_entries = database.get_day_entries(self.current_year, self.current_month, day_idx + 1)
         self._render_day_chips(day_idx, day_entries)
         total = sum(e.hours for e in day_entries)
@@ -540,6 +574,7 @@ class MonthlyView(ctk.CTkFrame):
     # --- Flags ---
 
     def _on_flag_change(self, day_idx: int):
+        self._flash_row(day_idx)
         flags = DayFlags(
             year=self.current_year,
             month=self.current_month,
@@ -585,6 +620,27 @@ class MonthlyView(ctk.CTkFrame):
         self.lbl_bonus_ae.configure(text=f"Bonus AE: {fmt(summary.bonus_ae)}")
         self.lbl_vt.configure(text=f"VT: {fmt(summary.vt_total)}")
         self.lbl_vr.configure(text=f"VR: {fmt(summary.vr_total)}")
+
+        num_days = calendar.monthrange(self.current_year, self.current_month)[1]
+        working_days = sum(
+            1 for d in range(1, num_days + 1)
+            if calendar.weekday(self.current_year, self.current_month, d) < 5
+        )
+        days_with_entries = len(set(e.day for e in entries if e.hours > 0))
+
+        if days_with_entries > 0 and working_days > 0:
+            media_diaria = summary.total_hours / days_with_entries
+            projecao_horas = media_diaria * working_days
+            projecao = projecao_horas * config.valor_hora + summary.bonus_ae + summary.vt_total + summary.vr_total
+        else:
+            media_diaria = 0.0
+            projecao = summary.total
+
+        self.lbl_media.configure(
+            text=f"Média/dia: {media_diaria:.1f}h".replace(".", ",")
+        )
+        self.lbl_projecao.configure(text=f"Projeção: {fmt(projecao)}")
+
         self.lbl_total.configure(text=f"TOTAL: {fmt(summary.total)}")
 
     # --- PDF Export ---
@@ -616,3 +672,133 @@ class MonthlyView(ctk.CTkFrame):
             ae_fechadas=ae,
             filepath=filepath,
         )
+        self._show_toast("PDF exportado!")
+
+    # --- Visual Feedback ---
+
+    def _flash_row(self, day_idx: int):
+        highlight = "#2d5a1e"
+        self.day_labels[day_idx].configure(fg_color=highlight)
+        self.week_labels[day_idx].configure(fg_color=highlight)
+
+        weekday = calendar.weekday(self.current_year, self.current_month, day_idx + 1)
+        original = "gray20" if weekday >= 5 else "transparent"
+
+        def restore():
+            try:
+                self.day_labels[day_idx].configure(fg_color=original)
+                self.week_labels[day_idx].configure(fg_color=original)
+            except Exception:
+                pass
+
+        self.after(800, restore)
+
+    def _show_toast(self, msg: str):
+        self.toast_label.configure(text=f"  {msg}  ")
+        self.toast_label.place(relx=0.5, y=50, anchor="center")
+        self.after(1800, self.toast_label.place_forget)
+
+    # --- Copy Patterns ---
+
+    def _on_copy(self, choice: str):
+        self.copy_menu.set("Copiar...")
+        if choice == "Copiar Mês Anterior":
+            self._copy_previous_month()
+        elif choice == "Copiar Semana":
+            self._copy_previous_week()
+
+    def _copy_previous_month(self):
+        if self.current_month == 1:
+            prev_year, prev_month = self.current_year - 1, 12
+        else:
+            prev_year, prev_month = self.current_year, self.current_month - 1
+
+        prev_entries = database.get_month_entries(prev_year, prev_month)
+        prev_flags = database.get_month_flags(prev_year, prev_month)
+
+        if not prev_entries and not prev_flags:
+            self._show_toast("Mês anterior sem dados")
+            return
+
+        curr_entries = database.get_month_entries(self.current_year, self.current_month)
+        curr_days_with_data = set(e.day for e in curr_entries)
+
+        num_days = calendar.monthrange(self.current_year, self.current_month)[1]
+        copied = 0
+
+        for entry in prev_entries:
+            if entry.day > num_days or entry.day in curr_days_with_data:
+                continue
+            database.upsert_day_entry(DayEntry(
+                year=self.current_year, month=self.current_month,
+                day=entry.day, slot=entry.slot,
+                event_type_id=entry.event_type_id, hours=entry.hours,
+            ))
+            copied += 1
+
+        prev_flags_map = {f.day: f for f in prev_flags}
+        for day, flag in prev_flags_map.items():
+            if day > num_days or day in curr_days_with_data:
+                continue
+            database.upsert_day_flags(DayFlags(
+                year=self.current_year, month=self.current_month,
+                day=day, vt=flag.vt, vr=flag.vr,
+            ))
+
+        prev_ae = database.get_ae_fechadas(prev_year, prev_month)
+        curr_ae = database.get_ae_fechadas(self.current_year, self.current_month)
+        if curr_ae == 0 and prev_ae > 0:
+            database.set_ae_fechadas(self.current_year, self.current_month, prev_ae)
+
+        self._load_month()
+        if copied > 0:
+            self._show_toast("Mês anterior copiado!")
+        else:
+            self._show_toast("Dias já preenchidos")
+
+    def _copy_previous_week(self):
+        today = date.today()
+        if (self.current_year, self.current_month) == (today.year, today.month):
+            ref = today
+        else:
+            last_day = calendar.monthrange(self.current_year, self.current_month)[1]
+            ref = date(self.current_year, self.current_month, last_day)
+
+        monday = ref - timedelta(days=ref.weekday())
+        num_days = calendar.monthrange(self.current_year, self.current_month)[1]
+        copied = 0
+
+        for offset in range(5):  # Mon-Fri
+            target = monday + timedelta(days=offset)
+            source = target - timedelta(days=7)
+
+            if target.year != self.current_year or target.month != self.current_month:
+                continue
+            if target.day > num_days:
+                continue
+
+            existing = database.get_day_entries(self.current_year, self.current_month, target.day)
+            if existing:
+                continue
+
+            source_entries = database.get_day_entries(source.year, source.month, source.day)
+            for entry in source_entries:
+                database.upsert_day_entry(DayEntry(
+                    year=self.current_year, month=self.current_month,
+                    day=target.day, slot=entry.slot,
+                    event_type_id=entry.event_type_id, hours=entry.hours,
+                ))
+                copied += 1
+
+            source_flag = database.get_day_flags(source.year, source.month, source.day)
+            if source_flag and (source_flag.vt or source_flag.vr):
+                database.upsert_day_flags(DayFlags(
+                    year=self.current_year, month=self.current_month,
+                    day=target.day, vt=source_flag.vt, vr=source_flag.vr,
+                ))
+
+        self._load_month()
+        if copied > 0:
+            self._show_toast("Semana copiada!")
+        else:
+            self._show_toast("Sem dados para copiar")

@@ -78,6 +78,8 @@ def init_db() -> None:
         cols = [r[1] for r in conn.execute("PRAGMA table_info(config)").fetchall()]
         if "nome" not in cols:
             conn.execute("ALTER TABLE config ADD COLUMN nome TEXT NOT NULL DEFAULT ''")
+        if "tema" not in cols:
+            conn.execute("ALTER TABLE config ADD COLUMN tema TEXT NOT NULL DEFAULT 'dark'")
 
         # Seed event types if empty
         row = conn.execute("SELECT COUNT(*) FROM event_types").fetchone()
@@ -112,6 +114,24 @@ def update_config(config: Config) -> None:
             "UPDATE config SET nome=?, valor_hora=?, valor_ae=?, vt_dia=?, vr_dia=? WHERE id=1",
             (config.nome, config.valor_hora, config.valor_ae, config.vt_dia, config.vr_dia),
         )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_tema() -> str:
+    conn = get_connection()
+    try:
+        row = conn.execute("SELECT tema FROM config WHERE id = 1").fetchone()
+        return row[0] if row else "dark"
+    finally:
+        conn.close()
+
+
+def set_tema(tema: str) -> None:
+    conn = get_connection()
+    try:
+        conn.execute("UPDATE config SET tema=? WHERE id=1", (tema,))
         conn.commit()
     finally:
         conn.close()
@@ -234,6 +254,21 @@ def upsert_day_flags(flags: DayFlags) -> None:
             (flags.year, flags.month, flags.day, int(flags.vt), int(flags.vr)),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def get_day_flags(year: int, month: int, day: int) -> DayFlags | None:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT year, month, day, vt, vr FROM day_flags "
+            "WHERE year=? AND month=? AND day=?",
+            (year, month, day),
+        ).fetchone()
+        if row:
+            return DayFlags(row[0], row[1], row[2], bool(row[3]), bool(row[4]))
+        return None
     finally:
         conn.close()
 
