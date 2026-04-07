@@ -1,4 +1,5 @@
 import customtkinter as ctk
+from tkinter import messagebox
 
 import database
 from ui.monthly_view import MonthlyView
@@ -7,8 +8,14 @@ from ui.config_view import ConfigView
 
 
 class App(ctk.CTk):
+    ACCENT_COLOR = "#3B8ED0"
+    ACCENT_HOVER_COLOR = "#2F6EA7"
+    ACCENT_TEXT_COLOR = "#3B8ED0"
+
     def __init__(self):
         super().__init__()
+        self._first_run_without_db = not database.DB_PATH.exists()
+        self._current_frame_name = "lancamentos"
 
         self.title("Controle de Horas")
         self.geometry("1200x750")
@@ -36,19 +43,19 @@ class App(ctk.CTk):
         title_label.grid(row=0, column=0, padx=20, pady=(20, 30))
 
         self.btn_lancamentos = ctk.CTkButton(
-            self.sidebar, text="Lançamentos",
+            self.sidebar, text="Lançamentos", width=160, border_width=1,
             command=lambda: self.show_frame("lancamentos"),
         )
         self.btn_lancamentos.grid(row=1, column=0, padx=20, pady=5)
 
         self.btn_historico = ctk.CTkButton(
-            self.sidebar, text="Histórico",
+            self.sidebar, text="Histórico", width=160, border_width=1,
             command=lambda: self.show_frame("historico"),
         )
         self.btn_historico.grid(row=2, column=0, padx=20, pady=5)
 
         self.btn_config = ctk.CTkButton(
-            self.sidebar, text="Configuração",
+            self.sidebar, text="Configuração", width=160, border_width=1,
             command=lambda: self.show_frame("config"),
         )
         self.btn_config.grid(row=3, column=0, padx=20, pady=5)
@@ -64,11 +71,18 @@ class App(ctk.CTk):
             self.sidebar,
             text="Tema: Claro" if self.tema_atual == "dark" else "Tema: Escuro",
             command=self._toggle_tema,
-            fg_color="transparent",
-            hover_color=("gray75", "gray25"),
             width=160,
+            border_width=1,
         )
         self.btn_tema.grid(row=6, column=0, padx=20, pady=(0, 20))
+
+        for key, btn in self.nav_buttons.items():
+            self._bind_secondary_hover(btn, lambda _, button=btn, button_key=key: self._on_nav_button_enter(button_key, button))
+            self._bind_secondary_leave(btn, lambda _, button=btn, button_key=key: self._on_nav_button_leave(button_key, button))
+
+        self._bind_secondary_hover(self.btn_tema, lambda _, button=self.btn_tema: self._apply_primary_button_style(button))
+        self._bind_secondary_leave(self.btn_tema, lambda _, button=self.btn_tema: self._apply_secondary_button_style(button))
+        self._apply_secondary_button_style(self.btn_tema)
 
         # Content area
         self.content = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
@@ -85,7 +99,7 @@ class App(ctk.CTk):
         for frame in self.frames.values():
             frame.grid(row=0, column=0, sticky="nsew")
 
-        self.show_frame("lancamentos")
+        self.show_frame("config" if self._first_run_without_db else "lancamentos")
 
         # Keyboard shortcuts
         self.bind_all("<Control-Key-1>", lambda e: self.show_frame("lancamentos"))
@@ -94,12 +108,16 @@ class App(ctk.CTk):
         self.bind_all("<Control-Left>", self._on_nav_left)
         self.bind_all("<Control-Right>", self._on_nav_right)
 
+        if self._first_run_without_db:
+            self.after(150, self._show_first_run_notice)
+
     def show_frame(self, name: str) -> None:
+        self._current_frame_name = name
         for key, btn in self.nav_buttons.items():
             if key == name:
-                btn.configure(fg_color=("gray75", "gray25"))
+                self._apply_primary_button_style(btn)
             else:
-                btn.configure(fg_color=("gray70", "gray30") if False else ctk.ThemeManager.theme["CTkButton"]["fg_color"])
+                self._apply_secondary_button_style(btn)
 
         frame = self.frames[name]
         frame.tkraise()
@@ -112,6 +130,15 @@ class App(ctk.CTk):
         if hasattr(lancamentos, "refresh_summary"):
             lancamentos.refresh_summary()
 
+    def _show_first_run_notice(self) -> None:
+        messagebox.showinfo(
+            "Configuração inicial",
+            "Nenhum banco de dados foi encontrado.\n\n"
+            "Configure seus dados em Configuração para começar a usar o sistema.",
+            parent=self,
+        )
+        self.show_frame("config")
+
     def _toggle_tema(self):
         self.tema_atual = "light" if self.tema_atual == "dark" else "dark"
         ctk.set_appearance_mode(self.tema_atual)
@@ -119,6 +146,45 @@ class App(ctk.CTk):
         self.btn_tema.configure(
             text="Tema: Claro" if self.tema_atual == "dark" else "Tema: Escuro"
         )
+        self._apply_secondary_button_style(self.btn_tema)
+        for key, btn in self.nav_buttons.items():
+            if key == self._current_frame_name:
+                self._apply_primary_button_style(btn)
+            else:
+                self._apply_secondary_button_style(btn)
+        for frame in self.frames.values():
+            if hasattr(frame, "refresh_theme"):
+                frame.refresh_theme()
+
+    def _apply_primary_button_style(self, button: ctk.CTkButton) -> None:
+        button.configure(
+            fg_color=self.ACCENT_COLOR,
+            hover_color=self.ACCENT_HOVER_COLOR,
+            border_color=self.ACCENT_COLOR,
+            text_color="white",
+        )
+
+    def _apply_secondary_button_style(self, button: ctk.CTkButton) -> None:
+        button.configure(
+            fg_color="transparent",
+            hover_color=self.ACCENT_COLOR,
+            border_color=self.ACCENT_COLOR,
+            text_color=self.ACCENT_TEXT_COLOR,
+        )
+
+    def _on_nav_button_enter(self, key: str, button: ctk.CTkButton) -> None:
+        if key != self._current_frame_name:
+            self._apply_primary_button_style(button)
+
+    def _on_nav_button_leave(self, key: str, button: ctk.CTkButton) -> None:
+        if key != self._current_frame_name:
+            self._apply_secondary_button_style(button)
+
+    def _bind_secondary_hover(self, button: ctk.CTkButton, callback) -> None:
+        button.bind("<Enter>", callback)
+
+    def _bind_secondary_leave(self, button: ctk.CTkButton, callback) -> None:
+        button.bind("<Leave>", callback)
 
     def _on_nav_left(self, event):
         focused = self.focus_get()

@@ -1,7 +1,7 @@
 import sqlite3
 from pathlib import Path
 
-from models import Config, DayEntry, DayFlags, EventType, MonthlySummary
+from models import Config, DayEntry, DayFlags, EventType, MonthlySummary, MonthAdjustment
 
 DB_PATH = Path(__file__).parent / "data" / "controle_horas.db"
 
@@ -67,6 +67,14 @@ def init_db() -> None:
                 ae_fechadas INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (year, month)
             );
+
+            CREATE TABLE IF NOT EXISTS month_adjustments (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                year        INTEGER NOT NULL,
+                month       INTEGER NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                value       REAL NOT NULL DEFAULT 0
+            );
         """)
 
         # Seed config if empty
@@ -88,6 +96,12 @@ def init_db() -> None:
                 "INSERT INTO event_types (name, color) VALUES (?, ?)",
                 DEFAULT_EVENT_TYPES,
             )
+        else:
+            for name, color in DEFAULT_EVENT_TYPES:
+                conn.execute(
+                    "UPDATE event_types SET color=? WHERE name=?",
+                    (color, name),
+                )
 
         conn.commit()
     finally:
@@ -144,18 +158,6 @@ def get_event_types() -> list[EventType]:
     try:
         rows = conn.execute("SELECT id, name, color FROM event_types ORDER BY id").fetchall()
         return [EventType(*r) for r in rows]
-    finally:
-        conn.close()
-
-
-def update_event_type_color(event_id: int, color: str) -> None:
-    conn = get_connection()
-    try:
-        conn.execute(
-            "UPDATE event_types SET color=? WHERE id=?",
-            (color, event_id),
-        )
-        conn.commit()
     finally:
         conn.close()
 
@@ -301,6 +303,36 @@ def set_ae_fechadas(year: int, month: int, value: int) -> None:
         conn.close()
 
 
+def get_month_adjustments(year: int, month: int) -> list[MonthAdjustment]:
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT description, value FROM month_adjustments "
+            "WHERE year=? AND month=? ORDER BY id",
+            (year, month),
+        ).fetchall()
+        return [MonthAdjustment(description=row[0], value=row[1]) for row in rows]
+    finally:
+        conn.close()
+
+
+def replace_month_adjustments(year: int, month: int, adjustments: list[MonthAdjustment]) -> None:
+    conn = get_connection()
+    try:
+        conn.execute(
+            "DELETE FROM month_adjustments WHERE year=? AND month=?",
+            (year, month),
+        )
+        if adjustments:
+            conn.executemany(
+                "INSERT INTO month_adjustments (year, month, description, value) VALUES (?, ?, ?, ?)",
+                [(year, month, adjustment.description, adjustment.value) for adjustment in adjustments],
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 # --- Yearly Summary ---
 
 def get_yearly_totals(year: int) -> list[tuple[int, float]]:
@@ -313,6 +345,9 @@ def get_yearly_totals(year: int) -> list[tuple[int, float]]:
             entries = get_month_entries(year, month)
             flags = get_month_flags(year, month)
             ae = get_ae_fechadas(year, month)
+            adjustments_total = sum(
+                adjustment.value for adjustment in get_month_adjustments(year, month)
+            )
 
             total_hours = sum(e.hours for e in entries)
             transport_days = sum(1 for f in flags if f.vt)
@@ -322,7 +357,7 @@ def get_yearly_totals(year: int) -> list[tuple[int, float]]:
             bonus_ae = ae * config.valor_ae
             vt_total = transport_days * config.vt_dia
             vr_total = meal_days * config.vr_dia
-            total = salary + bonus_ae + vt_total + vr_total
+            total = salary + bonus_ae + vt_total + vr_total + adjustments_total
 
             results.append((month, total))
         return results

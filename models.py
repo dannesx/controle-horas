@@ -42,6 +42,7 @@ class MonthlySummary:
     month: int
     total_hours: float
     ae_fechadas: int
+    adjustments_total: float
     transport_days: int
     meal_days: int
     salary: float
@@ -49,3 +50,9 @@ class MonthlySummary:
     vt_total: float
     vr_total: float
     total: float
+
+
+@dataclass
+class MonthAdjustment:
+    description: str
+    value: float

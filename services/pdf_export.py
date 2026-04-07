@@ -12,7 +12,7 @@ from reportlab.platypus import (
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
-from models import Config, DayEntry, DayFlags, EventType
+from models import Config, DayEntry, DayFlags, EventType, MonthAdjustment
 from services.calculator import calc_monthly_summary
 
 WEEKDAY_NAMES = ["seg", "ter", "qua", "qui", "sex", "sáb", "dom"]
@@ -229,6 +229,7 @@ def export_month_pdf(
     event_types: list[EventType],
     config: Config,
     ae_fechadas: int,
+    adjustments: list[MonthAdjustment],
     filepath: str,
 ) -> None:
     et_map = {et.id: et for et in event_types}
@@ -384,7 +385,10 @@ def export_month_pdf(
 
     # --- Summary section: pie chart | resumo | financeiro ---
     # All widths must sum to total_width for alignment
-    summary = calc_monthly_summary(year, month, entries, flags, config, ae_fechadas)
+    adjustments_total = sum(adjustment.value for adjustment in adjustments)
+    summary = calc_monthly_summary(
+        year, month, entries, flags, config, ae_fechadas, adjustments_total,
+    )
 
     pie_col_w = 58 * mm
     pie_gap_w = 8 * mm
@@ -438,11 +442,24 @@ def export_month_pdf(
          Paragraph(f"{_fmt_brl(summary.vt_total)}", right_aligned)],
         [Paragraph(f'VR {muted}({_fmt_brl(config.vr_dia)}/dia)</font>', cell_style),
          Paragraph(f"{_fmt_brl(summary.vr_total)}", right_aligned)],
-        [Paragraph("<b>TOTAL</b>", cell_style),
-         Paragraph(f"<b>{_fmt_brl(summary.total)}</b>",
-                    ParagraphStyle("rb", parent=cell_style, alignment=TA_RIGHT, fontSize=8))],
     ]
-    fin_table = Table(fin_data, colWidths=[fin_label_w, fin_val_w], rowHeights=row_heights)
+
+    for adjustment in adjustments:
+        fin_data.append([
+            Paragraph(adjustment.description, cell_style),
+            Paragraph(_fmt_brl(adjustment.value), right_aligned),
+        ])
+
+    fin_data.append([
+        Paragraph("<b>TOTAL</b>", cell_style),
+            Paragraph(
+            f"<b>{_fmt_brl(summary.total)}</b>",
+            ParagraphStyle("rb", parent=cell_style, alignment=TA_RIGHT, fontSize=8),
+        ),
+    ])
+
+    fin_row_heights = [header_h] + [row_h] * (len(fin_data) - 1)
+    fin_table = Table(fin_data, colWidths=[fin_label_w, fin_val_w], rowHeights=fin_row_heights)
     fin_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), SUMMARY_HEADER_BG),
         ("SPAN", (0, 0), (-1, 0)),

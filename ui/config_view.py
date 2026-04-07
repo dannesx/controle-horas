@@ -1,5 +1,3 @@
-from tkinter import colorchooser
-
 import customtkinter as ctk
 
 import database
@@ -23,11 +21,9 @@ class ConfigView(ctk.CTkFrame):
         main = ctk.CTkFrame(self, fg_color="transparent")
         main.grid(row=1, column=0, padx=40)
         main.grid_columnconfigure(0, weight=1)
-        main.grid_columnconfigure(1, weight=1)
 
-        # --- Left: Personal + Financial ---
         left = ctk.CTkFrame(main)
-        left.grid(row=0, column=0, padx=(0, 15), sticky="n")
+        left.grid(row=0, column=0, sticky="n")
 
         # Nome
         ctk.CTkLabel(left, text="Dados Pessoais",
@@ -71,48 +67,7 @@ class ConfigView(ctk.CTkFrame):
         self.status_label = ctk.CTkLabel(left, text="")
         self.status_label.grid(row=8, column=0, columnspan=2)
 
-        # --- Right: Event Types with color pickers ---
-        right = ctk.CTkFrame(main)
-        right.grid(row=0, column=1, padx=(15, 0), sticky="n")
-
-        ctk.CTkLabel(right, text="Tipos de Evento",
-                     font=ctk.CTkFont(size=14, weight="bold")).grid(
-            row=0, column=0, columnspan=2, padx=20, pady=(15, 10),
-        )
-
-        self.color_buttons: list[tuple[int, ctk.CTkButton]] = []
-        self._build_event_types(right)
-
         self._load()
-
-    def _build_event_types(self, parent):
-        event_types = database.get_event_types()
-        for i, et in enumerate(event_types):
-            # Color button (clickable)
-            color_btn = ctk.CTkButton(
-                parent, text="", width=30, height=30,
-                fg_color=et.color, hover_color=et.color,
-                corner_radius=6,
-                command=lambda eid=et.id, idx=i: self._pick_color(eid, idx),
-            )
-            color_btn.grid(row=i + 1, column=0, padx=(20, 8), pady=6)
-            self.color_buttons.append((et.id, color_btn))
-
-            # Name label
-            ctk.CTkLabel(
-                parent, text=et.name, width=120, anchor="w",
-            ).grid(row=i + 1, column=1, padx=(0, 20), pady=6)
-
-    def _pick_color(self, event_id: int, btn_idx: int):
-        _, btn = self.color_buttons[btn_idx]
-        current = btn.cget("fg_color")
-        result = colorchooser.askcolor(color=current, title="Escolha uma cor")
-        if result[1]:
-            hex_color = result[1]
-            btn.configure(fg_color=hex_color, hover_color=hex_color)
-            database.update_event_type_color(event_id, hex_color)
-            if self.on_save_callback:
-                self.on_save_callback()
 
     def _load(self):
         config = database.get_config()
@@ -122,13 +77,6 @@ class ConfigView(ctk.CTkFrame):
             entry.delete(0, "end")
             val = getattr(config, key)
             entry.insert(0, f"{val:.2f}".replace(".", ","))
-
-        # Refresh color buttons
-        event_types = database.get_event_types()
-        for i, et in enumerate(event_types):
-            if i < len(self.color_buttons):
-                _, btn = self.color_buttons[i]
-                btn.configure(fg_color=et.color, hover_color=et.color)
 
     def _save(self):
         try:

@@ -3,7 +3,6 @@ from datetime import date
 import customtkinter as ctk
 import matplotlib
 matplotlib.use("TkAgg")
-import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 
@@ -73,6 +72,26 @@ class HistoryView(ctk.CTkFrame):
         )
         self.avg_label.grid(row=2, column=0, pady=10)
 
+    def _chart_theme(self) -> dict[str, str]:
+        if ctk.get_appearance_mode().lower() == "light":
+            return {
+                "figure_bg": "#f4f6f8",
+                "axes_bg": "#ffffff",
+                "text": "#1f2937",
+                "spine": "#cbd5e1",
+                "line": "#2563eb",
+            }
+        return {
+            "figure_bg": "#2b2b2b",
+            "axes_bg": "#2b2b2b",
+            "text": "#f3f4f6",
+            "spine": "#6b7280",
+            "line": "#4fc3f7",
+        }
+
+    def refresh_theme(self):
+        self._load()
+
     def _prev_year(self):
         self.current_year -= 1
         self._load()
@@ -122,14 +141,16 @@ class HistoryView(ctk.CTkFrame):
         self.ax.clear()
         months = [MONTH_ABBREVS[m] + f"/{str(self.current_year)[2:]}" for m, _ in totals]
         values = [t for _, t in totals]
+        theme = self._chart_theme()
 
-        self.ax.plot(months, values, marker="o", linewidth=2, color="#4fc3f7")
-        self.ax.set_title("Ganho x Período", color="white", fontsize=14)
-        self.ax.set_facecolor("#2b2b2b")
-        self.ax.tick_params(colors="white", labelsize=8, rotation=45)
-        self.ax.yaxis.label.set_color("white")
-        self.ax.spines["bottom"].set_color("gray")
-        self.ax.spines["left"].set_color("gray")
+        self.fig.patch.set_facecolor(theme["figure_bg"])
+        self.ax.plot(months, values, marker="o", linewidth=2, color=theme["line"])
+        self.ax.set_title("Ganho x Período", color=theme["text"], fontsize=14)
+        self.ax.set_facecolor(theme["axes_bg"])
+        self.ax.tick_params(colors=theme["text"], labelsize=8, rotation=45)
+        self.ax.yaxis.label.set_color(theme["text"])
+        self.ax.spines["bottom"].set_color(theme["spine"])
+        self.ax.spines["left"].set_color(theme["spine"])
         self.ax.spines["top"].set_visible(False)
         self.ax.spines["right"].set_visible(False)
 
