@@ -56,3 +56,12 @@ class MonthlySummary:
 class MonthAdjustment:
     description: str
     value: float
+
+
+@dataclass
+class DefaultWeekEntry:
+    id: int
+    weekday: int   # 0=Segunda ... 6=Domingo
+    slot: int
+    event_type_id: int
+    hours: float

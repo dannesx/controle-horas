@@ -1,4 +1,5 @@
 import customtkinter as ctk
+from datetime import date
 from tkinter import messagebox
 
 import database
@@ -110,6 +111,14 @@ class App(ctk.CTk):
 
         if self._first_run_without_db:
             self.after(150, self._show_first_run_notice)
+        else:
+            self.after(300, self._check_apply_default_week)
+
+        self.after(100, self._setup_holidays)
+
+        self.bind_all("<Button-4>", self._on_mousewheel)
+        self.bind_all("<Button-5>", self._on_mousewheel)
+        self.bind_all("<MouseWheel>", self._on_mousewheel)
 
     def show_frame(self, name: str) -> None:
         self._current_frame_name = name
@@ -129,6 +138,61 @@ class App(ctk.CTk):
         lancamentos = self.frames["lancamentos"]
         if hasattr(lancamentos, "refresh_summary"):
             lancamentos.refresh_summary()
+
+    def _setup_holidays(self) -> None:
+        today = date.today()
+        if database.has_holidays_for_year(today.year):
+            return
+
+        self._holiday_banner = ctk.CTkLabel(
+            self,
+            text="  Preparando feriados...  ",
+            fg_color=("#3B8ED0", "#1a4a7a"),
+            text_color="white",
+            corner_radius=6,
+            height=28,
+            font=ctk.CTkFont(size=12),
+        )
+        self._holiday_banner.place(relx=0.5, rely=1.0, anchor="s", y=-12)
+
+        database.ensure_holidays_for_year(today.year, on_complete=self._on_holidays_ready)
+
+    def _on_holidays_ready(self) -> None:
+        try:
+            self.after(0, self._finish_holidays_setup)
+        except Exception:
+            pass
+
+    def _finish_holidays_setup(self) -> None:
+        if hasattr(self, "_holiday_banner"):
+            self._holiday_banner.place_forget()
+        lancamentos = self.frames.get("lancamentos")
+        if lancamentos and hasattr(lancamentos, "_load_month"):
+            lancamentos._load_month()
+
+    def _check_apply_default_week(self) -> None:
+        today = date.today()
+        if not database.get_default_week():
+            return
+        if not database.is_month_empty(today.year, today.month):
+            return
+
+        month_name = [
+            "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+            "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+        ][today.month - 1]
+
+        answer = messagebox.askyesno(
+            "Aplicar semana padrão",
+            f"O mês de {month_name} está vazio.\n\n"
+            f"Deseja aplicar a semana padrão para {month_name} de {today.year}?",
+            parent=self,
+        )
+        if answer:
+            database.apply_default_week_to_month(today.year, today.month)
+            lancamentos = self.frames.get("lancamentos")
+            if lancamentos and hasattr(lancamentos, "on_show"):
+                lancamentos.on_show()
 
     def _show_first_run_notice(self) -> None:
         messagebox.showinfo(
@@ -185,6 +249,21 @@ class App(ctk.CTk):
 
     def _bind_secondary_leave(self, button: ctk.CTkButton, callback) -> None:
         button.bind("<Leave>", callback)
+
+    def _on_mousewheel(self, event):
+        widget = event.widget
+        while widget:
+            if isinstance(widget, ctk.CTkScrollableFrame):
+                canvas = widget._parent_canvas
+                if event.num == 4 or event.delta > 0:
+                    canvas.yview_scroll(-1, "units")
+                elif event.num == 5 or event.delta < 0:
+                    canvas.yview_scroll(1, "units")
+                return
+            try:
+                widget = widget.master
+            except Exception:
+                break
 
     def _on_nav_left(self, event):
         focused = self.focus_get()

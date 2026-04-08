@@ -1,7 +1,15 @@
+import calendar
+import json
 import sqlite3
+import threading
+import urllib.request
+from collections import defaultdict
+from datetime import date
 from pathlib import Path
 
-from models import Config, DayEntry, DayFlags, EventType, MonthlySummary, MonthAdjustment
+_fetching_years: set[int] = set()
+
+from models import Config, DayEntry, DayFlags, DefaultWeekEntry, EventType, MonthlySummary, MonthAdjustment
 
 DB_PATH = Path(__file__).parent / "data" / "controle_horas.db"
 
@@ -74,6 +82,28 @@ def init_db() -> None:
                 month       INTEGER NOT NULL,
                 description TEXT NOT NULL DEFAULT '',
                 value       REAL NOT NULL DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS default_week (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                weekday       INTEGER NOT NULL,
+                slot          INTEGER NOT NULL,
+                event_type_id INTEGER NOT NULL REFERENCES event_types(id),
+                hours         REAL NOT NULL DEFAULT 0.0
+            );
+
+            CREATE TABLE IF NOT EXISTS default_week_flags (
+                weekday INTEGER PRIMARY KEY,
+                vt      INTEGER NOT NULL DEFAULT 0,
+                vr      INTEGER NOT NULL DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS holidays (
+                year  INTEGER NOT NULL,
+                month INTEGER NOT NULL,
+                day   INTEGER NOT NULL,
+                name  TEXT NOT NULL,
+                PRIMARY KEY (year, month, day)
             );
         """)
 
@@ -218,6 +248,16 @@ def delete_day_entry(year: int, month: int, day: int, slot: int) -> None:
         conn.close()
 
 
+def delete_month_entries(year: int, month: int) -> None:
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM day_entries WHERE year=? AND month=?", (year, month))
+        conn.execute("DELETE FROM day_flags WHERE year=? AND month=?", (year, month))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def delete_day_entries_for_day(year: int, month: int, day: int) -> None:
     conn = get_connection()
     try:
@@ -328,6 +368,204 @@ def replace_month_adjustments(year: int, month: int, adjustments: list[MonthAdju
                 "INSERT INTO month_adjustments (year, month, description, value) VALUES (?, ?, ?, ?)",
                 [(year, month, adjustment.description, adjustment.value) for adjustment in adjustments],
             )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# --- Default Week ---
+
+def get_default_week() -> list[DefaultWeekEntry]:
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT id, weekday, slot, event_type_id, hours FROM default_week "
+            "ORDER BY weekday, slot"
+        ).fetchall()
+        return [DefaultWeekEntry(*r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_default_week_entries_for_weekday(weekday: int) -> list[DefaultWeekEntry]:
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT id, weekday, slot, event_type_id, hours FROM default_week "
+            "WHERE weekday=? ORDER BY slot",
+            (weekday,),
+        ).fetchall()
+        return [DefaultWeekEntry(*r) for r in rows]
+    finally:
+        conn.close()
+
+
+def save_default_week_entries_for_weekday(weekday: int, entries: list[DefaultWeekEntry]) -> None:
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM default_week WHERE weekday=?", (weekday,))
+        if entries:
+            conn.executemany(
+                "INSERT INTO default_week (weekday, slot, event_type_id, hours) VALUES (?, ?, ?, ?)",
+                [(e.weekday, e.slot, e.event_type_id, e.hours) for e in entries],
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def save_default_week(entries: list[DefaultWeekEntry]) -> None:
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM default_week")
+        if entries:
+            conn.executemany(
+                "INSERT INTO default_week (weekday, slot, event_type_id, hours) VALUES (?, ?, ?, ?)",
+                [(e.weekday, e.slot, e.event_type_id, e.hours) for e in entries],
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_default_week_flags() -> dict[int, tuple[bool, bool]]:
+    """Returns {weekday: (vt, vr)}."""
+    conn = get_connection()
+    try:
+        rows = conn.execute("SELECT weekday, vt, vr FROM default_week_flags").fetchall()
+        return {row[0]: (bool(row[1]), bool(row[2])) for row in rows}
+    finally:
+        conn.close()
+
+
+def save_default_week_flag(weekday: int, vt: bool, vr: bool) -> None:
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO default_week_flags (weekday, vt, vr) VALUES (?, ?, ?) "
+            "ON CONFLICT(weekday) DO UPDATE SET vt=excluded.vt, vr=excluded.vr",
+            (weekday, int(vt), int(vr)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def is_month_empty(year: int, month: int) -> bool:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM day_entries WHERE year=? AND month=?",
+            (year, month),
+        ).fetchone()
+        return row[0] == 0
+    finally:
+        conn.close()
+
+
+# --- Holidays ---
+
+def has_holidays_for_year(year: int) -> bool:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM holidays WHERE year=?", (year,)
+        ).fetchone()
+        return row[0] > 0
+    finally:
+        conn.close()
+
+
+def save_holidays(year: int, items: list[dict]) -> None:
+    """items: [{"date": "YYYY-MM-DD", "name": "..."}]"""
+    conn = get_connection()
+    try:
+        for item in items:
+            try:
+                parts = item["date"].split("-")
+                m, d = int(parts[1]), int(parts[2])
+                conn.execute(
+                    "INSERT OR IGNORE INTO holidays (year, month, day, name) VALUES (?, ?, ?, ?)",
+                    (year, m, d, item.get("name", "")),
+                )
+            except (KeyError, ValueError, IndexError):
+                continue
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_holidays_for_month(year: int, month: int) -> dict[int, str]:
+    """Returns {day: name} for the given month."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT day, name FROM holidays WHERE year=? AND month=?",
+            (year, month),
+        ).fetchall()
+        return {row[0]: row[1] for row in rows}
+    finally:
+        conn.close()
+
+
+def ensure_holidays_for_year(year: int, on_complete=None) -> None:
+    """Fetch and cache holidays for year if not already in DB (non-blocking)."""
+    if has_holidays_for_year(year) or year in _fetching_years:
+        return
+    _fetching_years.add(year)
+
+    def fetch():
+        try:
+            url = f"https://brasilapi.com.br/api/feriados/v1/{year}"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                items = json.loads(resp.read())
+            save_holidays(year, items)
+        except Exception:
+            pass
+            pass
+        finally:
+            _fetching_years.discard(year)
+            if on_complete:
+                on_complete()
+
+    threading.Thread(target=fetch, daemon=True).start()
+
+
+def apply_default_week_to_month(year: int, month: int) -> None:
+    entries = get_default_week()
+    if not entries:
+        return
+
+    by_weekday: dict[int, list[DefaultWeekEntry]] = defaultdict(list)
+    for e in entries:
+        by_weekday[e.weekday].append(e)
+    for wday in by_weekday:
+        by_weekday[wday].sort(key=lambda x: x.slot)
+
+    holiday_days = set(get_holidays_for_month(year, month).keys())
+    flags_map = get_default_week_flags()
+    num_days = calendar.monthrange(year, month)[1]
+    conn = get_connection()
+    try:
+        for day in range(1, num_days + 1):
+            if day in holiday_days:
+                continue
+            weekday = date(year, month, day).weekday()
+            if weekday in by_weekday:
+                for slot, entry in enumerate(by_weekday[weekday]):
+                    conn.execute(
+                        "INSERT OR IGNORE INTO day_entries "
+                        "(year, month, day, slot, event_type_id, hours) VALUES (?, ?, ?, ?, ?, ?)",
+                        (year, month, day, slot, entry.event_type_id, entry.hours),
+                    )
+                if weekday in flags_map:
+                    vt, vr = flags_map[weekday]
+                    conn.execute(
+                        "INSERT INTO day_flags (year, month, day, vt, vr) VALUES (?, ?, ?, ?, ?) "
+                        "ON CONFLICT(year, month, day) DO UPDATE SET vt=excluded.vt, vr=excluded.vr",
+                        (year, month, day, int(vt), int(vr)),
+                    )
         conn.commit()
     finally:
         conn.close()

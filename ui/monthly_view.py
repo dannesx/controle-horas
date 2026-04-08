@@ -404,7 +404,7 @@ class MonthExtrasPopup(ctk.CTkToplevel):
         self.row_frames: list[ctk.CTkFrame] = []
 
         self.title("Extras do Mês")
-        self.geometry("520x420")
+        self.geometry("520x500")
         self.resizable(False, False)
         self.transient(parent)
         self.wait_visibility()
@@ -412,7 +412,7 @@ class MonthExtrasPopup(ctk.CTkToplevel):
 
         self.update_idletasks()
         px = parent.winfo_rootx() + parent.winfo_width() // 2 - 260
-        py = parent.winfo_rooty() + parent.winfo_height() // 2 - 210
+        py = parent.winfo_rooty() + parent.winfo_height() // 2 - 250
         self.geometry(f"+{px}+{py}")
 
         ctk.CTkLabel(
@@ -556,6 +556,7 @@ class MonthlyView(ctk.CTkFrame):
         self._active_popup: DayEditPopup | None = None
         self._week_copy_popup: WeekCopyPopup | None = None
         self._month_extras_popup: MonthExtrasPopup | None = None
+        self.holiday_map: dict[int, str] = {}  # {day: name}
 
         self._build_nav_bar()
         self._build_grid_area()
@@ -572,6 +573,9 @@ class MonthlyView(ctk.CTkFrame):
 
     def _weekend_row_color(self):
         return ("gray86", "gray20")
+
+    def _holiday_row_color(self):
+        return ("#FEF3C7", "#B45309")
 
     def _subtle_text_color(self):
         return ("gray35", "gray65")
@@ -655,8 +659,8 @@ class MonthlyView(ctk.CTkFrame):
         )
 
         self.copy_menu = ctk.CTkOptionMenu(
-            nav, values=["Copiar Mês Anterior", "Copiar Semana"],
-            command=self._on_copy, width=180,
+            nav, values=["Copiar Mês Anterior", "Copiar Semana", "Aplicar Semana Padrão"],
+            command=self._on_copy, width=210,
             fg_color=("gray75", "gray25"),
             button_color=("gray65", "gray35"),
             button_hover_color=("gray55", "gray45"),
@@ -781,7 +785,13 @@ class MonthlyView(ctk.CTkFrame):
             weekday = current_date.weekday()
             is_weekend = weekday >= 5
             is_today = current_date == today
-            row_bg = self._today_row_color() if is_today else self._weekend_row_color() if is_weekend else "transparent"
+            is_holiday = (day_idx + 1) in self.holiday_map
+            row_bg = (
+                self._today_row_color() if is_today
+                else self._holiday_row_color() if is_holiday
+                else self._weekend_row_color() if is_weekend
+                else "transparent"
+            )
             row_text_color = "white" if is_today else self._default_row_text_color()
 
             week_number = self._get_week_number(current_date)
@@ -899,62 +909,85 @@ class MonthlyView(ctk.CTkFrame):
 
     def _build_summary(self):
         self.summary_frame = ctk.CTkFrame(self)
-        self.summary_frame.grid(row=3, column=0, sticky="ew", padx=10, pady=(5, 10))
+        self.summary_frame.grid(row=3, column=0, sticky="ew", padx=10, pady=(3, 6))
 
-        left = ctk.CTkFrame(self.summary_frame, fg_color="transparent")
-        left.pack(side="left", padx=20, pady=10)
+        PAD = 4
 
-        self.lbl_horas_totais = ctk.CTkLabel(left, text="Horas Totais: 0")
-        self.lbl_horas_totais.pack(anchor="w")
-
-        self.lbl_ae_fechadas = ctk.CTkLabel(left, text="AE Fechadas: 0")
-        self.lbl_ae_fechadas.pack(anchor="w")
-
-        self.lbl_ajustes = ctk.CTkLabel(left, text="Ajustes: R$ 0,00")
-        self.lbl_ajustes.pack(anchor="w")
-
-        self.lbl_transportes = ctk.CTkLabel(left, text="Transportes: 0")
-        self.lbl_transportes.pack(anchor="w")
-
-        self.lbl_alimentacao = ctk.CTkLabel(left, text="Alimentação: 0")
-        self.lbl_alimentacao.pack(anchor="w")
+        # ── Zone 1: button + chips ──
+        z1 = ctk.CTkFrame(self.summary_frame, fg_color="transparent")
+        z1.pack(side="left", padx=(PAD, 0), pady=PAD)
 
         ctk.CTkButton(
-            left, text="Extras do mês", command=self._open_month_extras_popup,
-        ).pack(anchor="w", pady=(8, 0))
+            z1, text="Extras do mês", width=120, height=24,
+            command=self._open_month_extras_popup,
+        ).pack(side="left", padx=(0, 8))
 
-        right = ctk.CTkFrame(self.summary_frame, fg_color="transparent")
-        right.pack(side="right", padx=20, pady=10)
+        self.lbl_horas_totais = self._stat_chip(z1, "0h")
+        self.lbl_ae_fechadas  = self._stat_chip(z1, "AE 0")
+        self.lbl_transportes  = self._stat_chip(z1, "VT 0")
+        self.lbl_alimentacao  = self._stat_chip(z1, "VR 0")
 
-        self.lbl_salario = ctk.CTkLabel(right, text="Salário: R$ 0,00")
-        self.lbl_salario.pack(anchor="e")
-
-        self.lbl_bonus_ae = ctk.CTkLabel(right, text="Bonus AE: R$ 0,00")
-        self.lbl_bonus_ae.pack(anchor="e")
-
-        self.lbl_valor_ajustes = ctk.CTkLabel(right, text="Ajustes: R$ 0,00")
-        self.lbl_valor_ajustes.pack(anchor="e")
-
-        self.lbl_vt = ctk.CTkLabel(right, text="VT: R$ 0,00")
-        self.lbl_vt.pack(anchor="e")
-
-        self.lbl_vr = ctk.CTkLabel(right, text="VR: R$ 0,00")
-        self.lbl_vr.pack(anchor="e")
-
-        self.summary_divider = ctk.CTkFrame(right, height=1, fg_color=self._divider_color())
-        self.summary_divider.pack(fill="x", pady=6)
-
-        self.lbl_media = ctk.CTkLabel(
-            right, text="Média/dia: 0h",
-            text_color=self._subtle_text_color(),
+        # divider
+        ctk.CTkFrame(self.summary_frame, width=1,
+                     fg_color=self._divider_color()).pack(
+            side="left", fill="y", padx=PAD, pady=PAD,
         )
-        self.lbl_media.pack(anchor="e")
 
+        # ── Zone 2: breakdown (single row, label above value) ──
+        z2 = ctk.CTkFrame(self.summary_frame, fg_color="transparent")
+        z2.pack(side="left", pady=PAD)
+
+        breakdown = [
+            ("Salário",  "lbl_salario"),
+            ("Bônus AE", "lbl_bonus_ae"),
+            ("VT",       "lbl_vt"),
+            ("VR",       "lbl_vr"),
+            ("Ajustes",  "lbl_ajustes"),
+        ]
+        for title, attr in breakdown:
+            col = ctk.CTkFrame(z2, fg_color="transparent")
+            col.pack(side="left", padx=(0, 14))
+            ctk.CTkLabel(col, text=title,
+                         font=ctk.CTkFont(size=9),
+                         text_color=self._subtle_text_color()).pack(anchor="w")
+            lbl = ctk.CTkLabel(col, text="R$ 0,00",
+                               font=ctk.CTkFont(size=12, weight="bold"))
+            lbl.pack(anchor="w")
+            setattr(self, attr, lbl)
+
+        self.lbl_valor_ajustes = self.lbl_ajustes
+
+        # divider
+        ctk.CTkFrame(self.summary_frame, width=1,
+                     fg_color=self._divider_color()).pack(
+            side="left", fill="y", padx=PAD, pady=PAD,
+        )
+
+        # ── Zone 3: TOTAL ──
+        z3 = ctk.CTkFrame(self.summary_frame, fg_color="transparent")
+        z3.pack(side="right", padx=(0, PAD), pady=PAD)
+
+        ctk.CTkLabel(z3, text="TOTAL",
+                     font=ctk.CTkFont(size=9),
+                     text_color=self._subtle_text_color()).pack(anchor="e")
         self.lbl_total = ctk.CTkLabel(
-            right, text="TOTAL: R$ 0,00",
-            font=ctk.CTkFont(size=16, weight="bold"),
+            z3, text="R$ 0,00",
+            font=ctk.CTkFont(size=18, weight="bold"),
         )
-        self.lbl_total.pack(anchor="e", pady=(5, 0))
+        self.lbl_total.pack(anchor="e")
+
+        self.summary_divider = ctk.CTkFrame(z3, height=0, fg_color="transparent")
+
+    def _stat_chip(self, parent, text: str) -> ctk.CTkLabel:
+        lbl = ctk.CTkLabel(
+            parent, text=text,
+            fg_color=("gray82", "gray25"),
+            corner_radius=6,
+            font=ctk.CTkFont(size=11, weight="bold"),
+            height=22, padx=7,
+        )
+        lbl.pack(side="left", padx=(0, 4))
+        return lbl
 
     # --- Data Loading ---
 
@@ -962,6 +995,9 @@ class MonthlyView(ctk.CTkFrame):
         self.month_label.configure(
             text=f"{MONTH_NAMES[self.current_month]} / {self.current_year}"
         )
+
+        # Load holidays from DB (fetch is handled once at app startup)
+        self.holiday_map = database.get_holidays_for_month(self.current_year, self.current_month)
 
         num_days = calendar.monthrange(self.current_year, self.current_month)[1]
         self._show_rows(num_days)
@@ -981,6 +1017,8 @@ class MonthlyView(ctk.CTkFrame):
             day_num = day_idx + 1
             day_entries = entries_by_day.get(day_num, [])
             self._render_day_chips(day_idx, day_entries)
+            if day_num in self.holiday_map:
+                self._add_holiday_badge(day_idx, self.holiday_map[day_num])
             total = sum(e.hours for e in day_entries)
             totals_by_day[day_num] = total
             self.hours_labels[day_idx].configure(
@@ -1011,7 +1049,6 @@ class MonthlyView(ctk.CTkFrame):
 
     def refresh_theme(self):
         self.summary_divider.configure(fg_color=self._divider_color())
-        self.lbl_media.configure(text_color=self._subtle_text_color())
         self._load_month()
 
     # --- Popup ---
@@ -1038,6 +1075,9 @@ class MonthlyView(ctk.CTkFrame):
         self._flash_row(day_idx)
         day_entries = database.get_day_entries(self.current_year, self.current_month, day_idx + 1)
         self._render_day_chips(day_idx, day_entries)
+        day_num = day_idx + 1
+        if day_num in self.holiday_map:
+            self._add_holiday_badge(day_idx, self.holiday_map[day_num])
         total = sum(e.hours for e in day_entries)
         self.hours_labels[day_idx].configure(
             text=str(total).replace(".", ",") if total else "0"
@@ -1092,32 +1132,21 @@ class MonthlyView(ctk.CTkFrame):
         )
 
         fmt = lambda v: f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        fmth = lambda v: str(v).replace(".", ",")
 
-        self.lbl_horas_totais.configure(
-            text=f"Horas Totais: {summary.total_hours}".replace(".", ",")
-        )
-        self.lbl_ae_fechadas.configure(text=f"AE Fechadas: {summary.ae_fechadas}")
-        self.lbl_ajustes.configure(text=f"Ajustes: {fmt(summary.adjustments_total)}")
-        self.lbl_transportes.configure(text=f"Transportes: {summary.transport_days}")
-        self.lbl_alimentacao.configure(text=f"Alimentação: {summary.meal_days}")
-        self.lbl_salario.configure(text=f"Salário: {fmt(summary.salary)}")
-        self.lbl_bonus_ae.configure(text=f"Bonus AE: {fmt(summary.bonus_ae)}")
-        self.lbl_valor_ajustes.configure(text=f"Ajustes: {fmt(summary.adjustments_total)}")
-        self.lbl_vt.configure(text=f"VT: {fmt(summary.vt_total)}")
-        self.lbl_vr.configure(text=f"VR: {fmt(summary.vr_total)}")
+        hours_str = fmth(summary.total_hours)
+        self.lbl_horas_totais.configure(text=f"{hours_str}h")
+        self.lbl_ae_fechadas.configure(text=f"AE {summary.ae_fechadas}")
+        self.lbl_transportes.configure(text=f"VT {summary.transport_days}")
+        self.lbl_alimentacao.configure(text=f"VR {summary.meal_days}")
 
-        days_with_entries = len(set(e.day for e in entries if e.hours > 0))
+        self.lbl_salario.configure(text=fmt(summary.salary))
+        self.lbl_bonus_ae.configure(text=fmt(summary.bonus_ae))
+        self.lbl_vt.configure(text=fmt(summary.vt_total))
+        self.lbl_vr.configure(text=fmt(summary.vr_total))
+        self.lbl_ajustes.configure(text=fmt(summary.adjustments_total))
 
-        if days_with_entries > 0:
-            media_diaria = summary.total_hours / days_with_entries
-        else:
-            media_diaria = 0.0
-
-        self.lbl_media.configure(
-            text=f"Média/dia: {media_diaria:.1f}h".replace(".", ",")
-        )
-
-        self.lbl_total.configure(text=f"TOTAL: {fmt(summary.total)}")
+        self.lbl_total.configure(text=fmt(summary.total))
 
     # --- PDF Export ---
 
@@ -1154,6 +1183,18 @@ class MonthlyView(ctk.CTkFrame):
 
     # --- Visual Feedback ---
 
+    def _add_holiday_badge(self, day_idx: int, name: str):
+        frame = self.chips_frames[day_idx]
+        short = name if len(name) <= 16 else name[:15] + "…"
+        ctk.CTkLabel(
+            frame, text=f"  {short}  ",
+            fg_color=("#E67E22", "#7A3D00"),
+            text_color="white",
+            corner_radius=4,
+            font=ctk.CTkFont(size=10),
+            height=24,
+        ).pack(side="left", padx=(0, 3))
+
     def _flash_row(self, day_idx: int):
         highlight = "#2d5a1e"
         week_label_idx = self.week_group_start_by_day.get(day_idx, day_idx)
@@ -1163,10 +1204,12 @@ class MonthlyView(ctk.CTkFrame):
 
         current_date = date(self.current_year, self.current_month, day_idx + 1)
         weekday = current_date.weekday()
+        is_holiday = (day_idx + 1) in self.holiday_map
         original = (
-            self._today_row_color()
-            if current_date == date.today()
-            else self._weekend_row_color() if weekday >= 5 else "transparent"
+            self._today_row_color() if current_date == date.today()
+            else self._holiday_row_color() if is_holiday
+            else self._weekend_row_color() if weekday >= 5
+            else "transparent"
         )
 
         def restore():
@@ -1192,6 +1235,8 @@ class MonthlyView(ctk.CTkFrame):
             self._copy_previous_month()
         elif choice == "Copiar Semana":
             self._open_copy_week_popup()
+        elif choice == "Aplicar Semana Padrão":
+            self._apply_default_week()
 
     def _copy_previous_month(self):
         if self.current_month == 1:
@@ -1236,6 +1281,36 @@ class MonthlyView(ctk.CTkFrame):
             self._show_toast("Mês anterior copiado!")
         else:
             self._show_toast("Dias já preenchidos")
+
+    def _apply_default_week(self):
+        from tkinter import messagebox
+
+        today = date.today()
+        if (self.current_year, self.current_month) > (today.year, today.month):
+            self._show_toast("Não aplicável em meses futuros")
+            return
+
+        if not database.get_default_week():
+            self._show_toast("Semana padrão não configurada")
+            return
+
+        month_name = MONTH_NAMES[self.current_month]
+        has_data = bool(database.get_month_entries(self.current_year, self.current_month))
+        if has_data:
+            ok = messagebox.askokcancel(
+                "Atenção",
+                f"Essa ação vai apagar todos os eventos de {month_name} de {self.current_year} "
+                f"e substituir pela semana padrão.\n\nDeseja continuar?",
+                icon="warning",
+                parent=self.winfo_toplevel(),
+            )
+            if not ok:
+                return
+
+        database.delete_month_entries(self.current_year, self.current_month)
+        database.apply_default_week_to_month(self.current_year, self.current_month)
+        self._load_month()
+        self._show_toast(f"Semana padrão aplicada em {month_name}!")
 
     def _open_copy_week_popup(self):
         if self._week_copy_popup and self._week_copy_popup.winfo_exists():
